@@ -17,11 +17,15 @@ limitations under the License.
 package sync
 
 import (
+	"reflect"
+
 	appspub "github.com/openkruise/kruise/apis/apps/pub"
 	appsv1alpha1 "github.com/openkruise/kruise/apis/apps/v1alpha1"
 	clonesetcore "github.com/openkruise/kruise/pkg/controller/cloneset/core"
 	clonesetutils "github.com/openkruise/kruise/pkg/controller/cloneset/utils"
+	"github.com/openkruise/kruise/pkg/features"
 	"github.com/openkruise/kruise/pkg/util"
+	utilfeature "github.com/openkruise/kruise/pkg/util/feature"
 	"github.com/openkruise/kruise/pkg/util/lifecycle"
 	"github.com/openkruise/kruise/pkg/util/specifieddelete"
 	v1 "k8s.io/api/core/v1"
@@ -57,6 +61,10 @@ type expectationDiffs struct {
 	updateMaxUnavailable int
 }
 
+func (e expectationDiffs) isEmpty() bool {
+	return reflect.DeepEqual(e, expectationDiffs{})
+}
+
 // This is the most important algorithm in cloneset-controller.
 // It calculates the pod numbers to scaling and updating for current CloneSet.
 func calculateDiffsWithExpectation(cs *appsv1alpha1.CloneSet, pods []*v1.Pod, currentRevision, updateRevision string) (res expectationDiffs) {
@@ -77,6 +85,9 @@ func calculateDiffsWithExpectation(cs *appsv1alpha1.CloneSet, pods []*v1.Pod, cu
 	var notReadyNewRevisionCount, notReadyOldRevisionCount int
 	var toDeleteNewRevisionCount, toDeleteOldRevisionCount, preDeletingCount int
 	defer func() {
+		if res.isEmpty() {
+			return
+		}
 		klog.V(1).Infof("Calculate diffs for CloneSet %s/%s, replicas=%d, partition=%d, maxSurge=%d, maxUnavailable=%d,"+
 			" allPods=%d, newRevisionPods=%d, newRevisionActivePods=%d, oldRevisionPods=%d, oldRevisionActivePods=%d,"+
 			" notReadyNewRevisionCount=%d, notReadyOldRevisionCount=%d,"+
@@ -101,7 +112,7 @@ func calculateDiffsWithExpectation(cs *appsv1alpha1.CloneSet, pods []*v1.Pod, cu
 
 				if isSpecifiedDelete(cs, p) {
 					toDeleteNewRevisionCount++
-				} else if !isPodReady(coreControl, p, cs.Spec.MinReadySeconds) {
+				} else if !isPodReady(coreControl, p) {
 					notReadyNewRevisionCount++
 				}
 			}
@@ -117,7 +128,7 @@ func calculateDiffsWithExpectation(cs *appsv1alpha1.CloneSet, pods []*v1.Pod, cu
 
 				if isSpecifiedDelete(cs, p) {
 					toDeleteOldRevisionCount++
-				} else if !isPodReady(coreControl, p, cs.Spec.MinReadySeconds) {
+				} else if !isPodReady(coreControl, p) {
 					notReadyOldRevisionCount++
 				}
 			}
@@ -127,7 +138,8 @@ func calculateDiffsWithExpectation(cs *appsv1alpha1.CloneSet, pods []*v1.Pod, cu
 	updateOldDiff := oldRevisionActiveCount - partition
 	updateNewDiff := newRevisionActiveCount - (replicas - partition)
 	// If the currentRevision and updateRevision are consistent, Pods can only update to this revision
-	if updateRevision == currentRevision {
+	// If the CloneSetPartitionRollback is not enabled, Pods can only update to the new revision
+	if updateRevision == currentRevision || !utilfeature.DefaultFeatureGate.Enabled(features.CloneSetPartitionRollback) {
 		updateOldDiff = integer.IntMax(updateOldDiff, 0)
 		updateNewDiff = integer.IntMin(updateNewDiff, 0)
 	}
@@ -206,7 +218,11 @@ func isSpecifiedDelete(cs *appsv1alpha1.CloneSet, pod *v1.Pod) bool {
 	return false
 }
 
-func isPodReady(coreControl clonesetcore.Control, pod *v1.Pod, minReadySeconds int32) bool {
+func isPodReady(coreControl clonesetcore.Control, pod *v1.Pod) bool {
+	return isPodAvailable(coreControl, pod, 0)
+}
+
+func isPodAvailable(coreControl clonesetcore.Control, pod *v1.Pod, minReadySeconds int32) bool {
 	state := lifecycle.GetPodLifecycleState(pod)
 	if state != "" && state != appspub.LifecycleStateNormal {
 		return false

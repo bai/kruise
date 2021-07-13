@@ -30,6 +30,7 @@ import (
 	admissionv1beta1 "k8s.io/api/admission/v1beta1"
 	v1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/errors"
+	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/apimachinery/pkg/util/sets"
 	kubecontroller "k8s.io/kubernetes/pkg/controller"
@@ -59,6 +60,7 @@ func (h *ContainerRecreateRequestHandler) Handle(ctx context.Context, req admiss
 	if err != nil {
 		return admission.Errored(http.StatusBadRequest, err)
 	}
+	var copy runtime.Object = obj.DeepCopy()
 
 	if req.AdmissionRequest.Operation == admissionv1beta1.Update {
 		oldObj := &appsv1alpha1.ContainerRecreateRequest{}
@@ -136,6 +138,9 @@ func (h *ContainerRecreateRequestHandler) Handle(ctx context.Context, req admiss
 		return admission.Errored(http.StatusBadRequest, err)
 	}
 
+	if reflect.DeepEqual(obj, copy) {
+		return admission.Allowed("")
+	}
 	marshalled, err := json.Marshal(obj)
 	if err != nil {
 		return admission.Errored(http.StatusInternalServerError, err)

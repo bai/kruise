@@ -20,12 +20,13 @@ import (
 	"context"
 	"encoding/json"
 	"net/http"
+	"reflect"
 
 	appsv1alpha1 "github.com/openkruise/kruise/apis/apps/v1alpha1"
 	"github.com/openkruise/kruise/pkg/control/sidecarcontrol"
-
 	"github.com/openkruise/kruise/pkg/util"
 	"k8s.io/api/admission/v1beta1"
+	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/klog"
 	"sigs.k8s.io/controller-runtime/pkg/webhook/admission"
 )
@@ -72,7 +73,7 @@ func (h *SidecarSetCreateHandler) Handle(ctx context.Context, req admission.Requ
 	if err != nil {
 		return admission.Errored(http.StatusBadRequest, err)
 	}
-
+	var copy runtime.Object = obj.DeepCopy()
 	switch req.AdmissionRequest.Operation {
 	case v1beta1.Create, v1beta1.Update:
 		appsv1alpha1.SetDefaultsSidecarSet(obj)
@@ -81,7 +82,9 @@ func (h *SidecarSetCreateHandler) Handle(ctx context.Context, req admission.Requ
 		}
 	}
 	klog.V(4).Infof("sidecarset after mutating: %v", util.DumpJSON(obj))
-
+	if reflect.DeepEqual(obj, copy) {
+		return admission.Allowed("")
+	}
 	marshalled, err := json.Marshal(obj)
 	if err != nil {
 		return admission.Errored(http.StatusInternalServerError, err)

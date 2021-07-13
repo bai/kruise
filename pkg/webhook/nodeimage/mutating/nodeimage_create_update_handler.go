@@ -20,10 +20,12 @@ import (
 	"context"
 	"encoding/json"
 	"net/http"
+	"reflect"
 
 	appsv1alpha1 "github.com/openkruise/kruise/apis/apps/v1alpha1"
 	"github.com/openkruise/kruise/pkg/util"
 	utilimagejob "github.com/openkruise/kruise/pkg/util/imagejob"
+	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/klog"
 	"sigs.k8s.io/controller-runtime/pkg/webhook/admission"
 )
@@ -43,7 +45,7 @@ func (h *NodeImageCreateUpdateHandler) Handle(ctx context.Context, req admission
 	if err != nil {
 		return admission.Errored(http.StatusBadRequest, err)
 	}
-
+	var copy runtime.Object = obj.DeepCopy()
 	// Set defaults
 	appsv1alpha1.SetDefaultsNodeImage(obj)
 
@@ -56,7 +58,9 @@ func (h *NodeImageCreateUpdateHandler) Handle(ctx context.Context, req admission
 		utilimagejob.SortStatusImageTags(&imageStatus)
 		obj.Status.ImageStatuses[name] = imageStatus
 	}
-
+	if reflect.DeepEqual(obj, copy) {
+		return admission.Allowed("")
+	}
 	marshalled, err := json.Marshal(obj)
 	if err != nil {
 		return admission.Errored(http.StatusInternalServerError, err)

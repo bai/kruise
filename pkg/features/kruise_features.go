@@ -21,10 +21,11 @@ import (
 	"os"
 	"strings"
 
-	utilfeature "github.com/openkruise/kruise/pkg/util/feature"
 	"k8s.io/apimachinery/pkg/util/runtime"
 	"k8s.io/apimachinery/pkg/util/sets"
 	"k8s.io/component-base/featuregate"
+
+	utilfeature "github.com/openkruise/kruise/pkg/util/feature"
 )
 
 const (
@@ -45,6 +46,18 @@ const (
 	// PreDownloadImageForInPlaceUpdate enables cloneset-controller to create ImagePullJobs to
 	// pre-download images for in-place update.
 	PreDownloadImageForInPlaceUpdate featuregate.Feature = "PreDownloadImageForInPlaceUpdate"
+
+	// CloneSetPartitionRollback enables CloneSet controller to rollback Pods to currentRevision
+	// when number of updateRevision pods is bigger than (replicas - partition).
+	CloneSetPartitionRollback featuregate.Feature = "CloneSetPartitionRollback"
+
+	// ResourcesDeletionProtection enables protection for resources deletion, currently supports
+	// Namespace, CustomResourcesDefinition, Deployment, StatefulSet, ReplicaSet, CloneSet, Advanced StatefulSet, UnitedDeployment.
+	// It is only supported for Kubernetes version >= 1.16
+	// Note that if it is enabled during Kruise installation or upgrade, Kruise will require more authorities:
+	// 1. Webhook for deletion operation of namespace, crd, deployment, statefulset, replicaset and workloads in Kruise.
+	// 2. ClusterRole for reading all resource types, because CRD validation needs to list the CRs of this CRD.
+	ResourcesDeletionProtection featuregate.Feature = "ResourcesDeletionProtection"
 )
 
 var defaultFeatureGates = map[featuregate.Feature]featuregate.FeatureSpec{
@@ -53,6 +66,8 @@ var defaultFeatureGates = map[featuregate.Feature]featuregate.FeatureSpec{
 	CloneSetShortHash:                {Default: false, PreRelease: featuregate.Alpha},
 	KruisePodReadinessGate:           {Default: false, PreRelease: featuregate.Alpha},
 	PreDownloadImageForInPlaceUpdate: {Default: false, PreRelease: featuregate.Alpha},
+	CloneSetPartitionRollback:        {Default: false, PreRelease: featuregate.Alpha},
+	ResourcesDeletionProtection:      {Default: false, PreRelease: featuregate.Alpha},
 }
 
 func init() {

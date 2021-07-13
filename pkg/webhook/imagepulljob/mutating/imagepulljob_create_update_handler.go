@@ -20,9 +20,11 @@ import (
 	"context"
 	"encoding/json"
 	"net/http"
+	"reflect"
 
 	appsv1alpha1 "github.com/openkruise/kruise/apis/apps/v1alpha1"
 	"github.com/openkruise/kruise/pkg/util"
+	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/klog"
 	"sigs.k8s.io/controller-runtime/pkg/webhook/admission"
 )
@@ -42,9 +44,11 @@ func (h *ImagePullJobCreateUpdateHandler) Handle(ctx context.Context, req admiss
 	if err != nil {
 		return admission.Errored(http.StatusBadRequest, err)
 	}
-
+	var copy runtime.Object = obj.DeepCopy()
 	appsv1alpha1.SetDefaultsImagePullJob(obj)
-
+	if reflect.DeepEqual(obj, copy) {
+		return admission.Allowed("")
+	}
 	marshalled, err := json.Marshal(obj)
 	if err != nil {
 		return admission.Errored(http.StatusInternalServerError, err)

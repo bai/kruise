@@ -20,12 +20,13 @@ import (
 	"context"
 	"encoding/json"
 	"net/http"
-
-	"github.com/openkruise/kruise/pkg/util"
-	"k8s.io/klog"
-	"sigs.k8s.io/controller-runtime/pkg/webhook/admission"
+	"reflect"
 
 	appsv1alpha1 "github.com/openkruise/kruise/apis/apps/v1alpha1"
+	"github.com/openkruise/kruise/pkg/util"
+	"k8s.io/apimachinery/pkg/runtime"
+	"k8s.io/klog"
+	"sigs.k8s.io/controller-runtime/pkg/webhook/admission"
 )
 
 // UnitedDeploymentCreateUpdateHandler handles UnitedDeployment
@@ -50,10 +51,12 @@ func (h *UnitedDeploymentCreateUpdateHandler) Handle(ctx context.Context, req ad
 	if err != nil {
 		return admission.Errored(http.StatusBadRequest, err)
 	}
-
+	var copy runtime.Object = obj.DeepCopy()
 	appsv1alpha1.SetDefaultsUnitedDeployment(obj)
 	obj.Status = appsv1alpha1.UnitedDeploymentStatus{}
-
+	if reflect.DeepEqual(obj, copy) {
+		return admission.Allowed("")
+	}
 	marshalled, err := json.Marshal(obj)
 	if err != nil {
 		return admission.Errored(http.StatusInternalServerError, err)

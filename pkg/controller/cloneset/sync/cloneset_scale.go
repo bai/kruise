@@ -34,7 +34,6 @@ import (
 	"k8s.io/apimachinery/pkg/util/rand"
 	"k8s.io/apimachinery/pkg/util/sets"
 	"k8s.io/klog"
-	kubecontroller "k8s.io/kubernetes/pkg/controller"
 )
 
 const (
@@ -63,7 +62,7 @@ func (r *realControl) Scale(
 
 	// 1. manage pods to delete and in preDelete
 	podsSpecifiedToDelete, podsInPreDelete, numToDelete := getPlannedDeletedPods(updateCS, pods)
-	if modified, err := r.managePreparingDelete(updateCS, pods, util.DiffPods(podsInPreDelete, podsSpecifiedToDelete), numToDelete); err != nil || modified {
+	if modified, err := r.managePreparingDelete(updateCS, pods, podsInPreDelete, numToDelete); err != nil || modified {
 		return modified, err
 	}
 
@@ -112,7 +111,7 @@ func (r *realControl) Scale(
 
 		podsToDelete = make([]*v1.Pod, 0, len(podsToDelete))
 		for _, pod := range newPodsToDelete {
-			if !isPodReady(coreControl, pod, updateCS.Spec.MinReadySeconds) {
+			if !isPodReady(coreControl, pod) {
 				podsToDelete = append(podsToDelete, pod)
 			} else if diffRes.deleteReadyLimit > 0 {
 				podsToDelete = append(podsToDelete, pod)
@@ -120,7 +119,7 @@ func (r *realControl) Scale(
 			}
 		}
 		for _, pod := range oldPodsToDelete {
-			if !isPodReady(coreControl, pod, updateCS.Spec.MinReadySeconds) {
+			if !isPodReady(coreControl, pod) {
 				podsToDelete = append(podsToDelete, pod)
 			} else if diffRes.deleteReadyLimit > 0 {
 				podsToDelete = append(podsToDelete, pod)
@@ -144,10 +143,10 @@ func (r *realControl) Scale(
 		klog.V(3).Infof("CloneSet %s begin to scale in %d pods including %d (current rev), delete ready limit: %d",
 			controllerKey, -diffRes.scaleNum, -diffRes.scaleNumOldRevision, diffRes.deleteReadyLimit)
 
-		podsPreparingToDelete := choosePodsToDelete(-diffRes.scaleNum, -diffRes.scaleNumOldRevision, notUpdatedPods, updatedPods)
+		podsPreparingToDelete := r.choosePodsToDelete(updateCS, -diffRes.scaleNum, -diffRes.scaleNumOldRevision, notUpdatedPods, updatedPods)
 		podsToDelete := make([]*v1.Pod, 0, len(podsPreparingToDelete))
 		for _, pod := range podsPreparingToDelete {
-			if !isPodReady(coreControl, pod, updateCS.Spec.MinReadySeconds) {
+			if !isPodReady(coreControl, pod) {
 				podsToDelete = append(podsToDelete, pod)
 			} else if diffRes.deleteReadyLimit > 0 {
 				podsToDelete = append(podsToDelete, pod)
@@ -365,14 +364,24 @@ func getOrGenInstanceID(existingIDs, availableIDs sets.String) string {
 	return id
 }
 
-func choosePodsToDelete(totalDiff int, currentRevDiff int, notUpdatedPods, updatedPods []*v1.Pod) []*v1.Pod {
+func (r *realControl) choosePodsToDelete(cs *appsv1alpha1.CloneSet, totalDiff int, currentRevDiff int, notUpdatedPods, updatedPods []*v1.Pod) []*v1.Pod {
+	coreControl := clonesetcore.New(cs)
 	choose := func(pods []*v1.Pod, diff int) []*v1.Pod {
 		// No need to sort pods if we are about to delete all of them.
 		if diff < len(pods) {
-			// Sort the pods in the order such that not-ready < ready, unscheduled
-			// < scheduled, and pending < running. This ensures that we delete pods
-			// in the earlier stages whenever possible.
-			sort.Sort(kubecontroller.ActivePods(pods))
+			var ranker clonesetutils.Ranker
+			if constraints := coreControl.GetPodSpreadConstraint(); len(constraints) > 0 {
+				ranker = clonesetutils.NewSpreadConstraintsRanker(pods, constraints, r.Client)
+			} else {
+				ranker = clonesetutils.NewSameNodeRanker(pods)
+			}
+			sort.Sort(clonesetutils.ActivePodsWithRanks{
+				Pods:   pods,
+				Ranker: ranker,
+				AvailableFunc: func(pod *v1.Pod) bool {
+					return isPodAvailable(coreControl, pod, cs.Spec.MinReadySeconds)
+				},
+			})
 		} else if diff > len(pods) {
 			klog.Warningf("Diff > len(pods) in choosePodsToDelete func which is not expected.")
 			return pods

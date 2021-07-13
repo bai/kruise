@@ -20,8 +20,10 @@ import (
 	"context"
 	"encoding/json"
 	"net/http"
+	"reflect"
 
 	appsv1alpha1 "github.com/openkruise/kruise/apis/apps/v1alpha1"
+	"k8s.io/apimachinery/pkg/runtime"
 	"sigs.k8s.io/controller-runtime/pkg/webhook/admission"
 )
 
@@ -53,11 +55,15 @@ func (h *AdvancedCronJobCreateUpdateHandler) Handle(ctx context.Context, req adm
 		return admission.Errored(http.StatusBadRequest, err)
 	}
 
+	var copy runtime.Object = obj.DeepCopy()
 	err = h.mutatingAdvancedCronJobFn(ctx, obj)
 	if err != nil {
 		return admission.Errored(http.StatusInternalServerError, err)
 	}
 
+	if reflect.DeepEqual(obj, copy) {
+		return admission.Allowed("")
+	}
 	marshalled, err := json.Marshal(obj)
 	if err != nil {
 		return admission.Errored(http.StatusInternalServerError, err)

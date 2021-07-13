@@ -20,8 +20,10 @@ import (
 	"context"
 	"encoding/json"
 	"net/http"
+	"reflect"
 
 	corev1 "k8s.io/api/core/v1"
+	"k8s.io/apimachinery/pkg/runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/runtime/inject"
 	"sigs.k8s.io/controller-runtime/pkg/webhook/admission"
@@ -49,6 +51,7 @@ func (h *PodCreateHandler) Handle(ctx context.Context, req admission.Request) ad
 	if err != nil {
 		return admission.Errored(http.StatusBadRequest, err)
 	}
+	var copy runtime.Object = obj.DeepCopy()
 	// when pod.namespace is empty, using req.namespace
 	if obj.Namespace == "" {
 		obj.Namespace = req.Namespace
@@ -60,7 +63,9 @@ func (h *PodCreateHandler) Handle(ctx context.Context, req admission.Request) ad
 	if err != nil {
 		return admission.Errored(http.StatusInternalServerError, err)
 	}
-
+	if reflect.DeepEqual(obj, copy) {
+		return admission.Allowed("")
+	}
 	marshalled, err := json.Marshal(obj)
 	if err != nil {
 		return admission.Errored(http.StatusInternalServerError, err)
